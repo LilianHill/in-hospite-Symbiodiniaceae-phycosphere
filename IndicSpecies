@@ -1,0 +1,13 @@
+install.packages("indicspecies")
+install.packages("remotes")
+remotes::install_github("vmikk/metagMisc") #phyloseq_to_df
+
+library(indicspecies)
+library(metagMisc)
+
+
+abund = cami[,3:ncol(cami)]
+Fraction = cami$Fraction
+
+inv.g = multipatt(abund, Fraction, func = "IndVal.g", control = how(nperm=999))
+summary(inv.g, alpha=0.02, indvalcomp=TRUE)
