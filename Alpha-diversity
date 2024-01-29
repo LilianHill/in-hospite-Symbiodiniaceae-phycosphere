@@ -1,0 +1,143 @@
+library(qiime2R)
+library(phyloseq)
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(gplots)
+library(vegan)
+library(DESeq2)
+library(readxl)
+library(dplyr)
+library(reshape2)
+library(ggthemes)
+library(ape)
+
+####alfa_div####
+
+###import###
+otu.tab.dev.sub <- read.table("D:/Documents/LEMM/Camila/results 16s/cami_otu.txt")
+OTU.DEV.SUB = otu_table(otu.tab.dev.sub, taxa_are_rows = TRUE)
+OTU.DEV.SUB
+
+tax.tab.dev.sub <- read.table("D:/Documents/LEMM/Camila/results 16s/taxonomy_table.txt")
+tax.tab.df.dev.sub <- data.frame(tax.tab.dev.sub)
+tax.tab.m.dev.sub <- as.matrix((tax.tab.df.dev.sub))
+TAX.DEV.SUB = tax_table(tax.tab.m.dev.sub)
+TAX.DEV.SUB
+
+data.dev.sub = read.csv("D:/Documents/LEMM/Camila/results 16s/camifac.txt")
+sample.data.dev.sub = sample_data(data.dev.sub)
+
+
+rownames(sample.data.dev.sub) <- sample_names(physeq.dev.sub)
+
+
+physeq = phyloseq(OTU.DEV.SUB, TAX.DEV.SUB, sample.data.dev.sub, dev.sub_tree)
+
+ps = physeq
+
+sort(sample_sums(ps))
+
+##################################
+
+rarecurve(t(otu_table(ps)), step = 1000, sample = c(8446, 123137), cex = 1, lwd = 1)
+
+S <- specnumber(t(otu_table(ps))) 
+ps.rare <- rarefy_even_depth(ps, sample.size = min(sample_sums(ps)))
+Srare <- specnumber(t(otu_table(ps.rare))) 
+
+plot(S, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species")
+abline(0, 1)
+
+ps.rare1 <- rarefy_even_depth(ps, sample.size = min(sample_sums(ps)))
+
+sample_data(ps.rare1)$Chao1 <- estimate_richness(ps.rare1, measures="Chao1", split = TRUE)[,1]
+sample_data(ps.rare1)$Shannon <- estimate_richness(ps.rare1, measures="Shannon", split = TRUE)[,1]
+sample_data(ps.rare1)$Observed <- estimate_richness(ps.rare1,measures="Observed", split = TRUE)[,1]
+sample_data(ps.rare1)$InvSimpson <- estimate_richness(ps.rare1,measures="InvSimpson", split = TRUE)[,1]
+
+
+alpha <- estimate_richness(ps.rare1, measures = c("Shannon", "InvSimpson", 'Chao1'))
+
+alpha
+
+
+plot.obs <- plot_richness(ps.rare1, x="method", color="device", nrow=1, measures=c("Shannon",
+                                                                                                 
+                                                                                                 "Chao1")) +
+  
+  geom_boxplot() +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 0.5, size=10, color = "black")) #+
+#scale_x_discrete(limits=c("SW", "Glass", "HDPE", "LDPE", "PBAT"))
+
+plot.obs
+
+ggsave(filename = "C:/Users/fmodo/Documents/Analysis-InSituCultivation/Results/Shannon-chao-chamb-chamb_sub.png", plot = plot.obs,
+       width = 14, height = 5, dpi = 600)
+
+
+plot.obs1 = plot.obs  + scale_color_manual(values=c("#4e79a7", "#ff9933", "#3432a8", "#9e32a8", "#a83253", "#3ea832" ))
+
+plot.obs1 = plot.obs  + scale_fill_manual(values=c("#000000", "#f28e2b", "#e15759",
+                                                  "#76b7b2", "#59a14f", "#edc948"))
+
+plot.obs1
+
+#############
+
+                 ad.test.df <- alpha[,c('Shannon', 'Chao1')]
+                 ad.test.df <- cbind(ad.test.df,
+                                       sample_data(ps.rare1)[, c('method')])
+                 colnames(ad.test.df) <- c('Shannon', 'Chao1', 'method')
+                   
+                   
+                
+                   shapiro.test(ad.test.df$Shannon)
+                   #shapiro.test(ad.test.df$InvSimpson)
+                   shapiro.test(ad.test.df$Chao1)
+                   
+                
+                   kruskal.shannon <- kruskal.test(Shannon ~ method, data=ad.test.df)
+                   data.frame(unlist(kruskal.shannon))
+                   
+                  
+                   #kruskal.invsimpson <- kruskal.test(InvSimpson ~ method, data=ad.test.df)
+                   #data.frame(unlist(kruskal.invsimpson))
+                   
+                   kruskal.Chao1 <-  kruskal.test(Chao1 ~ method, data=ad.test.df)
+                   data.frame(unlist(kruskal.Chao1))
+                  
+                
+                   test_anova_shannon <- aov(Shannon ~ method, data=ad.test.df)
+                   summary(test_anova_shannon)
+                   
+                   test_anova_chao1 <- aov(Chao1 ~ method, data=ad.test.df)
+                   summary(test_anova_chao1)
+                   
+                   #tUKEY
+                   
+                   TukeyHSD( test_anova_shannon )
+                   TukeyHSD(test_anova_chao1)
+                   
+                   # Teste T
+                   t.test(Shannon ~ method, data=ad.test.df)
+                   
+                   ## Mann-Whitney
+                   
+                   #wilcox.test(Shannon ~ Portion2, data=ad.test.df)
+                   
+                   pairwise.wilcox.test(ad.test.df$Shannon, ad.test.df$method,
+                                        p.adjust.method = "BH")
+                   
+                   pairwise.wilcox.test(ad.test.df$Chao1, ad.test.df$method,
+                                        p.adjust.method = "BH")
+                   
+                  # pairwise.wilcox.test(ad.test.df$InvSimpson, ad.test.df$method,
+                   #                     p.adjust.method = "BH")
+                   
+                   
+
+                  
+
+                                      
