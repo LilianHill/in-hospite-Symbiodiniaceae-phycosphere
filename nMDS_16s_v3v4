@@ -1,0 +1,209 @@
+###############################################################################################################################################
+############################################################# SORENSEN nMDS ###################################################################
+###############################################################################################################################################
+
+library(cowplot)
+library(vegan)
+library(ggplot2)
+library(viridis)
+library(cluster)
+library(pairwiseAdonis)
+library(dplyr)
+library(betapart)
+
+
+dataall <- read.delim("deseq_otu_table_phyloseq.txt", row.names = 1)
+dataall <- t(dataall) %>%
+  as.data.frame()
+dataall <- dataall %>% mutate_if(is.numeric, ~1 * (. != 0))
+
+
+fact <- read.csv("factors.csv", row.names = 1)
+
+
+beta <- beta.pair(dataall, index.family="sorensen")
+str(beta)
+m.sim <- as.matrix(beta$beta.sim)
+m.sne <- as.matrix(beta$beta.sne)
+m.sor <- as.matrix(beta$beta.sor)
+
+
+m.sor <-  vegdist(m.sor)
+beta_mds <- metaMDS(m.sor, trymax = 1000)
+beta_mds
+
+MDS_xy_sor <- data.frame(beta_mds$points)
+
+MDS_xy_sor$Fraction <- as.factor(fact$Fraction)
+MDS_xy_sor$Stage <- as.factor(fact$Stage)
+MDS_xy_sor$Individual <- as.factor(fact$Individual)
+
+
+p <- ggplot(MDS_xy_sor, aes(MDS1, MDS2)) + geom_point() + theme_bw() +
+  geom_point(aes(color = Fraction),size=3)+  
+  scale_color_brewer(palette = "Set1")+
+  theme(legend.title = element_text(size = 15), 
+        legend.text = element_text(size = 15))+
+  theme(legend.title = element_text(size = 15), 
+        legend.text = element_text(size = 15),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(colour = "black",  fill=NA)) 
+
+save_plot("sorensen_nMDS.pdf", p)
+
+###############################################################################################################################################
+########################################################### Bray - Curtis nMDS ################################################################
+###############################################################################################################################################
+
+###here you use the subsampled data and not the raw data
+dataall <- read.delim("nMDS/tDS.txt", row.names = 1) %>%
+  as.data.frame()
+
+####when transposing always have it as a dataframe - need to load dplyr for this package
+dataall <- t(dataall) %>%
+  as.data.frame()
+
+# factor for all samples
+fact <- read.csv("nMDS/factors_DS.csv", row.names = 1)
+
+data.bc <- vegdist(dataall, method = "bray")
+data.bc
+data.mds <- metaMDS(data.bc, autotransform = F, trace = F, trymax = 50)
+data.mds # stress: 0.1890098 
+
+MDS_xy <- data.frame(data.mds$points)
+
+p <- ggplot(MDS_xy, aes(MDS1, MDS2)) + geom_point() + theme_bw() +
+  geom_point(aes(color=Time, shape = Temperature, size = 3))+scale_color_brewer(palette = "Set1")+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.background = element_rect(colour = "black",  fill=NA))
+
+save_plot("Bray_curtis_nMDS.pdf", p)
+
+###############################################################################################################################################
+######################################################### 16S rRNA gene analysis ##############################################################
+###############################################################################################################################################
+
+dir.create("02_PreProcessedData")
+dir.create("03_MergedData")
+dir.create("04_FilteredData")
+dir.create("05_TrimmedData")
+dir.create("06_DereplicatedData")
+
+files = dir(path = '01_RawData/', pattern = '_R1_')
+files
+for (file1 in files)
+{
+  file2 = gsub(x = file1, pattern = '_R1_', replacement = '_R2_')
+  filename = gsub(x = file1, pattern = "_L001_R1_001.fastq.*", replacement = '', perl = T)
+  
+  command <- paste('java -jar ../00_DataNeeded/Trimmomatic-0.38/trimmomatic-0.38.jar PE 01_RawData/', file1, " 01_RawData/", file2, " 02_PreProcessedData/", filename, "_pF.fastq 02_PreProcessedData/", filename, "_upF.fastq 02_PreProcessedData/", filename, "_pR.fastq 02_PreProcessedData/", filename, "_upR.fastq HEADCROP:10 SLIDINGWINDOW:4:25 MINLEN:100", sep = "")
+  system(command)
+  
+  command = paste("../usearch11.0.667 -fastq_mergepairs 02_PreProcessedData/", filename, "_pF.fastq -reverse 02_PreProcessedData/", filename, "_pR.fastq -fastqout 03_MergedData/",filename, ".fastq -relabel @ -fastq_maxdiffs 5 -fastq_pctid 80 -fastq_minmergelen 250 -fastq_maxmergelen 550 -sample ", filename, sep = "")
+  system(command)
+  
+  command = paste("../usearch11.0.667 -fastq_filter 03_MergedData/", filename, ".fastq -fastaout 04_FilteredData/", filename, ".fasta -fastq_maxns 1 -fastq_maxee 1", sep = "")
+  system(command)
+  
+  command = paste("../usearch11.0.667  -fastx_uniques 04_FilteredData/", filename, ".fasta -fastaout 06_DereplicatedData/", filename, ".fasta -sizeout", sep = "")
+  system(command)
+}
+
+seq_lengths = NULL
+for(f in dir(path = '06_DereplicatedData/', full.names = T))
+{
+  print(f)
+  fasta_file = read.fasta(f)
+  seq_lengths = c(seq_lengths, as.numeric(lengths(fasta_file)))
+}
+hist(seq_lengths) 
+quantile(seq_lengths)
+
+dir.create("07_JoinedData")
+
+system("cat 06_DereplicatedData/*.fasta > 07_JoinedData/AllSamples.fasta")
+
+FNA = readLines("07_JoinedData/AllSamples.fasta")
+FNA[grep(pattern = ">", x = FNA, invert = T)] = toupper(FNA[grep(pattern = ">", x = FNA, invert = T)])
+write(x = FNA, file = "07_JoinedData/AllSamples2.fasta")
+
+
+dir.create("08_UniqueSequences")
+system("../usearch11.0.667 -fastx_uniques 07_JoinedData/AllSamples2.fasta -fastaout 08_UniqueSequences/AllSamples_uniques.fasta -sizein -sizeout -strand both")
+
+
+dir.create("09_DenoisedSequences")
+
+system("../usearch11.0.667 -unoise3 08_UniqueSequences/AllSamples_uniques.fasta -zotus 09_DenoisedSequences/AllSamples_denoised.fasta")
+
+dir.create("10_UchimeReference")
+
+system("../usearch11.0.667 -uchime2_ref 09_DenoisedSequences/AllSamples_denoised.fasta -db ../00_DataNeeded/db_SILVA_138_1/SILVA_138.1_SSURef_NR99_tax_silva.fasta -strand plus -mode high_confidence -notmatched 10_UchimeReference/AllSamples_unoise_nc.fasta")
+
+
+dir.create("11_OtuTable")
+system("../usearch11.0.667 -otutab 07_JoinedData/AllSamples2.fasta -otus 10_UchimeReference/AllSamples_unoise_nc.fasta -id 0.97 -otutabout 11_OtuTable/AllSamples_unoise_otu_table1.txt")
+
+
+library(tidyverse)
+library(reshape2)
+
+##############################################################################################################
+#################################################### GTDB BLCA ###############################################
+##############################################################################################################
+
+
+dir.create("12_TaxAssignmentGTDB_BLCA")
+
+system("cp ../00_DataNeeded/clustalo/clustal-omega-1.2.3-macosx ../00_DataNeeded/clustalo/clustalo ; chmod +x ../00_DataNeeded/clustalo/clustalo") # MacOS
+system("cp ../00_DataNeeded/muscle/muscle3.8.31_i86darwin64 ../00_DataNeeded/muscle/muscle ; chmod +x ../00_DataNeeded/muscle/muscle") # MacOS
+
+Sys.setenv(PATH = paste(Sys.getenv("PATH"), "../00_DataNeeded/clustalo", sep = ":"))
+Sys.setenv(PATH = paste(Sys.getenv("PATH"), "../00_DataNeeded/muscle", sep = ":"))
+
+
+system('python3 ../00_DataNeeded/BLCA/2.blca_main.py -r ../00_DataNeeded/db_GTDB207/ssu_all_r207_BLCAparsed.taxonomy -q ../00_DataNeeded/db_GTDB207/ssu_all_r207_BLCAparsed.fasta -i 10_UchimeReference/AllSamples_unoise_nc.fasta -o 12_TaxAssignmentGTDB_BLCA/AllSamples_unoise_BLCA_out.1.txt')
+
+m = 1
+for (each_line in readLines(file('12_TaxAssignmentGTDB_BLCA/AllSamples_unoise_BLCA_out.1.txt',open="r")) ){
+  each_line_split = strsplit(each_line, '\t')
+  OTU_ID = each_line_split[[1]][1]
+  taxonomy = each_line_split[[1]][2]
+  taxonomy_split = strsplit(taxonomy, ';')
+  taxonomy_no_rank = ''
+  n = 1
+  for (taxon in taxonomy_split[[1]]){
+    if (n%%2 == 1){
+      taxon_split = strsplit(taxon, ':')
+      if (length(taxon_split[[1]]) ==2)
+      {taxon_no_rank = taxon_split[[1]][2]} 
+      else 
+      {taxon_no_rank = taxon_split[[1]][1]}
+      taxonomy_no_rank = paste(taxonomy_no_rank, taxon_no_rank, sep = ");")} 
+    else 
+    {taxonomy_no_rank = paste(taxonomy_no_rank, taxon, sep = "(")}
+    n = n + 1
+  }
+  taxonomy_no_rank = paste(taxonomy_no_rank, ')', sep = "")
+  taxonomy_no_rank = substr(taxonomy_no_rank, 3, nchar(taxonomy_no_rank))
+  if (taxonomy_no_rank == "Unclassified)"){taxonomy_no_rank = "Unclassified"}
+  
+  taxonomy_no_rank_with_OTU = paste(OTU_ID, taxonomy_no_rank, sep = "\t")
+  
+  if (m == 1)
+  {cat(taxonomy_no_rank_with_OTU,file='12_TaxAssignmentGTDB_BLCA/AllSamples_unoise_BLCA_out.2.txt',sep="\n", append=FALSE)} 
+  else 
+  {cat(taxonomy_no_rank_with_OTU,file='12_TaxAssignmentGTDB_BLCA/AllSamples_unoise_BLCA_out.2.txt',sep="\n", append=TRUE)}
+  m = m +1
+}
+
+
+dir.create("13_FinalOtuTableGTDB_BLCA")
+OTU = read.delim("11_OtuTable/AllSamples_unoise_otu_table1.txt", header = T)
+
+TAX = read.delim("12_TaxAssignmentGTDB_BLCA/AllSamples_unoise_BLCA_out.2.txt", header = F)
+names(TAX) = c("X.OTU.ID", "Taxonomy")
+
+OTU_TAX = merge(OTU, TAX, by = "X.OTU.ID")
+write.table(OTU_TAX, "13_FinalOtuTableGTDB_BLCA/AllSamples_unoise_otu_table_BLCA_filtered2.txt", sep = "\t", row.names = F, col.names = T, quote = F)
